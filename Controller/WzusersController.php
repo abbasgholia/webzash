@@ -1267,56 +1267,23 @@ class WzusersController extends WebzashAppController {
 			}
 
 			/* Check if user is allowed to access the account */
-			$activateAccount = FALSE;
-			$account_role = '';
-			if ($wzuser['Wzuser']['all_accounts'] == 1) {
-				$activateAccount = TRUE;
-				/* Read account role */
-				$temp = $this->Wzuseraccount->find('first', array(
-					'conditions' => array(
-						'Wzuseraccount.wzaccount_id' => $this->request->data['Wzuser']['wzaccount_id'],
-					),
-				));
-				if ($temp) {
-					$account_role = $temp['Wzuseraccount']['role'];
-				} else {
-					$account_role = '';
-				}
-			} else {
-				$temp = $this->Wzuseraccount->find('first', array(
-					'conditions' => array(
-						'Wzuseraccount.wzuser_id' => $this->Auth->user('id'),
-						'Wzuseraccount.wzaccount_id' => $this->request->data['Wzuser']['wzaccount_id'],
-					),
-				));
-				if ($temp) {
-					$activateAccount = TRUE;
-					$account_role = $temp['Wzuseraccount']['role'];
-				} else {
-					$account_role = '';
-				}
-			}
-			if ($activateAccount) {
-				$temp = $this->Wzaccount->findById($this->request->data['Wzuser']['wzaccount_id']);
-				if (!$temp) {
+			$account_role = $this->getUserRole( $wzuser );
+			if ( $account_role !== false ) {
+
+				$account_info = $this->Wzaccount->findById($this->request->data['Wzuser']['wzaccount_id']);
+
+				// If account not found, remove it from currently active
+				if (!$account_info) {
 					$this->Session->delete('ActiveAccount.id');
 					$this->Session->delete('ActiveAccount.account_role');
+
 					$this->Session->setFlash(__d('webzash', 'Account not found.'), 'danger');
 					return $this->redirect(array('plugin' => 'webzash', 'controller' => 'wzusers', 'action' => 'account'));
 				}
 
 				/* Setup account role */
-				$basic_roles = array('admin', 'manager', 'accountant', 'dataentry', 'guest');
-				if (in_array($account_role, $basic_roles)) {
-					$this->Session->write('ActiveAccount.account_role', $account_role);
-				} else {
-					/* Set the account role as per user profile */
-					$this->Session->write('ActiveAccount.account_role', $this->Auth->user('role'));
-				}
+				$this->setupActiveAccount( $account_info, $account_role );
 
-				$this->Session->write('ActiveAccount.id', $temp['Wzaccount']['id']);
-				$this->Session->setFlash(__d('webzash', 'Account "%s" activated.', $temp['Wzaccount']['label']), 'success');
-				return $this->redirect(array('plugin' => 'webzash', 'controller' => 'dashboard', 'action' => 'index'));
 			} else {
 				$this->Session->delete('ActiveAccount.id');
 				$this->Session->delete('ActiveAccount.account_role');
@@ -1330,6 +1297,70 @@ class WzusersController extends WebzashAppController {
 				$this->request->data['Wzuser']['wzaccount_id'] = 0;
 			}
 		}
+	}
+
+	private function setupActiveAccount( $account_info, $account_role ) {
+
+		$basic_roles = array('admin', 'manager', 'accountant', 'dataentry', 'guest');
+		if (in_array($account_role, $basic_roles)) {
+			$this->Session->write('ActiveAccount.account_role', $account_role);
+		} else {
+			/* Set the account role as per user profile */
+			$this->Session->write('ActiveAccount.account_role', $this->Auth->user('role'));
+		}
+
+		$this->Session->write('ActiveAccount.id', $account_info['Wzaccount']['id']);
+		$this->Session->setFlash(__d('webzash', 'Account "%s" activated.', $account_info['Wzaccount']['label']), 'success');
+		return $this->redirect(array('plugin' => 'webzash', 'controller' => 'dashboard', 'action' => 'index'));
+
+	}
+
+	private function getUserRole( $user ) {
+
+		/* Check if user has universal account access */
+		if ($user['Wzuser']['all_accounts'] == 1) {
+			$activateAccount = TRUE;
+
+			/* Read account role */
+			$temp = $this->Wzuseraccount->find('first', array(
+				'conditions' => array(
+					'Wzuseraccount.wzaccount_id' => $this->request->data['Wzuser']['wzaccount_id'],
+				),
+			));
+
+			// Set account role, if exists
+			if ($temp) {
+				$account_role = $temp['Wzuseraccount']['role'];
+			} else {
+				$account_role = '';
+			}
+
+		}	else {
+
+			// Find any relationship between user and account
+			$temp = $this->Wzuseraccount->find('first', array(
+				'conditions' => array(
+					'Wzuseraccount.wzuser_id' => $this->Auth->user('id'),
+					'Wzuseraccount.wzaccount_id' => $this->request->data['Wzuser']['wzaccount_id'],
+				),
+			));
+
+			// If exists, activate account
+			if ($temp) {
+				$activateAccount = TRUE;
+				$account_role = $temp['Wzuseraccount']['role'];
+			} else {
+				$account_role = '';
+			}
+
+		}
+
+		if ( $activateAccount ) {
+			return $account_role;
+		} else {
+			return false;
+		}
+
 	}
 
 	public function beforeFilter() {
