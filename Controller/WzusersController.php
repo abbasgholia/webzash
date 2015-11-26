@@ -1227,26 +1227,11 @@ class WzusersController extends WebzashAppController {
 		$wzaccounts_count = $this->Wzaccount->find('count');
 		$this->set('wzaccounts_count', $wzaccounts_count);
 
-		/* Create list of wzaccounts */
-		if ($wzuser['Wzuser']['all_accounts'] == 1) {
-			$wzaccounts = $this->Wzaccount->find('list', array(
-				'fields' => array('Wzaccount.id', 'Wzaccount.label'),
-				'order' => array('Wzaccount.label')
-			));
-			$wzaccounts = array(0 => '(NONE)') + $wzaccounts;
-		} else {
-			$wzaccounts = array();
-			$rawwzaccounts = $this->Wzuseraccount->find('all', array(
-				'conditions' => array('Wzuseraccount.wzuser_id' => $this->Auth->user('id')),
-			));
-			foreach ($rawwzaccounts as $row => $wzaccount) {
-				$account = $this->Wzaccount->findById($wzaccount['Wzuseraccount']['wzaccount_id']);
-				if ($account) {
-					$wzaccounts[$account['Wzaccount']['id']] = $account['Wzaccount']['label'];
-				}
-			}
-			$wzaccounts = array(0 => '(NONE)') + $wzaccounts;
-		}
+		/* Create list of accessible wzaccounts */
+		$wzaccounts = $this->getAccessibleAccounts( $wzuser );
+
+		// Add none selection option
+		$wzaccounts = array(0 => '(NONE)') + $wzaccounts;
 		$this->set('wzaccounts', $wzaccounts);
 
 		if ($this->Session->read('ActiveAccount.failed')) {
@@ -1291,15 +1276,46 @@ class WzusersController extends WebzashAppController {
 				return $this->redirect(array('plugin' => 'webzash', 'controller' => 'wzusers', 'action' => 'account'));
 			}
 		} else {
+
 			if ($curActiveAccount) {
 				$this->request->data['Wzuser']['wzaccount_id'] = $this->Session->read('ActiveAccount.id');
 			} else {
-				$this->request->data['Wzuser']['wzaccount_id'] = 0;
+
+				// Activate the first accessible account
+				$wzaccounts = $this->getAccessibleAccounts($wzuser);
+				reset( $wzaccounts );
+				$account_info = $this->Wzaccount->findById(key($wzaccounts));
+				$account_role = $this->getUserRole( $wzuser );
+				$this->setupActiveAccount( $account_info, $account_role, true );
 			}
 		}
 	}
 
-	private function setupActiveAccount( $account_info, $account_role ) {
+	private function getAccessibleAccounts( $wzuser ) {
+
+		if ($wzuser['Wzuser']['all_accounts'] == 1) {
+			$wzaccounts = $this->Wzaccount->find('list', array(
+				'fields' => array('Wzaccount.id', 'Wzaccount.label'),
+				'order' => array('Wzaccount.label')
+			));
+		} else {
+			$wzaccounts = array();
+			$rawwzaccounts = $this->Wzuseraccount->find('all', array(
+				'conditions' => array('Wzuseraccount.wzuser_id' => $this->Auth->user('id')),
+			));
+			foreach ($rawwzaccounts as $row => $wzaccount) {
+				$account = $this->Wzaccount->findById($wzaccount['Wzuseraccount']['wzaccount_id']);
+				if ($account) {
+					$wzaccounts[$account['Wzaccount']['id']] = $account['Wzaccount']['label'];
+				}
+			}
+
+		}
+
+		return $wzaccounts;
+	}
+
+	private function setupActiveAccount( $account_info, $account_role, $supress_message = false ) {
 
 		$basic_roles = array('admin', 'manager', 'accountant', 'dataentry', 'guest');
 		if (in_array($account_role, $basic_roles)) {
@@ -1309,8 +1325,10 @@ class WzusersController extends WebzashAppController {
 			$this->Session->write('ActiveAccount.account_role', $this->Auth->user('role'));
 		}
 
+		if ( ! $supress_message )
+			$this->Session->setFlash(__d('webzash', 'Account "%s" activated.', $account_info['Wzaccount']['label']), 'success');
+
 		$this->Session->write('ActiveAccount.id', $account_info['Wzaccount']['id']);
-		$this->Session->setFlash(__d('webzash', 'Account "%s" activated.', $account_info['Wzaccount']['label']), 'success');
 		return $this->redirect(array('plugin' => 'webzash', 'controller' => 'dashboard', 'action' => 'index'));
 
 	}
@@ -1324,7 +1342,7 @@ class WzusersController extends WebzashAppController {
 			/* Read account role */
 			$temp = $this->Wzuseraccount->find('first', array(
 				'conditions' => array(
-					'Wzuseraccount.wzaccount_id' => $this->request->data['Wzuser']['wzaccount_id'],
+					'Wzuseraccount.wzaccount_id' => $user['Wzuser']['id'],
 				),
 			));
 
